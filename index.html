@@ -36,6 +36,11 @@
   .mirror { transform: scaleX(-1); }
   .msg { position: absolute; color: var(--muted); text-align: center; padding: 16px; }
 
+  .controls { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 10px 16px;
+    border-top: 1px solid var(--line); align-items: center; }
+  .controls label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
+  .controls output { color: var(--text); font-family: Consolas, monospace; min-width: 3ch; }
+  input[type=range] { width: 100px; accent-color: var(--accent); }
   input[type=checkbox] { accent-color: var(--accent); }
   select, button { background: #1c1f23; color: var(--text); border: 1px solid var(--line);
     border-radius: 6px; padding: 5px 8px; font: inherit; }
@@ -74,6 +79,13 @@
   </section>
 </main>
 
+<div class="controls">
+  <label>Brightness <input type="range" id="bright" min="-100" max="100" value="0"><output id="brightOut"></output></label>
+  <label>Contrast <input type="range" id="contrast" min="0" max="300" value="120"><output id="contrastOut"></output></label>
+  <label>Gamma <input type="range" id="gamma" min="20" max="300" value="100"><output id="gammaOut"></output></label>
+  <label><input type="checkbox" id="invert"> Invert</label>
+</div>
+
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -94,12 +106,16 @@
   let imgData = null, out32 = null;
 
   // ---------- settings ----------
-  const S = {
-    cols: 160, font: 9, mirror: true, charset: CHARSET, ink: [232, 232, 232], paper: [0, 0, 0],
-    bright: 0, contrast: 1.2, gamma: 1, invert: false
-  };
+  const S = { cols: 160, font: 9, mirror: true, charset: CHARSET, ink: [232, 232, 232], paper: [0, 0, 0] };
   function readSettings() {
+    S.bright = +$('bright').value / 100;
+    S.contrast = +$('contrast').value / 100;
+    S.gamma = +$('gamma').value / 100;
+    S.invert = $('invert').checked;
     S.color = $('color').checked;
+    $('brightOut').textContent = Math.round(S.bright * 100);
+    $('contrastOut').textContent = S.contrast.toFixed(2);
+    $('gammaOut').textContent = S.gamma.toFixed(2);
   }
 
   // ---------- glyph atlas ----------
@@ -279,7 +295,9 @@
   camSelect.addEventListener('change', () => startCamera(camSelect.value));
   navigator.mediaDevices?.addEventListener?.('devicechange', () => listCameras(camSelect.value));
 
+  const onTone = () => { readSettings(); buildToneLUT(); };
   const onGlyph = () => { readSettings(); buildGlyphs(); };
+  ['bright', 'contrast', 'gamma', 'invert'].forEach(id => $(id).addEventListener('input', onTone));
   $('color').addEventListener('input', readSettings);
   window.addEventListener('resize', onGlyph); // devicePixelRatio can change between monitors
 
