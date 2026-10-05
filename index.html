@@ -214,7 +214,6 @@
   let frames = 0, fpsT = performance.now(), fps = 0, renderMs = 0;
 
   function render() {
-    requestAnimationFrame(render);
     if (!glyphs || video.readyState < 2 || !video.videoWidth) return;
     const t0 = performance.now();
 
@@ -296,6 +295,17 @@
     return lines.join('\n');
   }
 
+  // ---------- render loop ----------
+  // rAF stops when the window is hidden/minimized, which would freeze the virtual cam.
+  // A worker timer is not throttled, so it keeps frames flowing in the background.
+  function startLoop() {
+    const raf = () => { if (!document.hidden) render(); requestAnimationFrame(raf); };
+    requestAnimationFrame(raf);
+    const worker = new Worker(URL.createObjectURL(new Blob(
+      ['setInterval(() => postMessage(0), 1000 / 30)'], { type: 'text/javascript' })));
+    worker.onmessage = () => { if (document.hidden) render(); };
+  }
+
   // ---------- camera ----------
   async function listCameras(selectedId) {
     const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
@@ -364,7 +374,7 @@
   buildToneLUT();
   if (document.fonts?.ready) document.fonts.ready.then(buildGlyphs); else buildGlyphs();
   buildGlyphs();
-  requestAnimationFrame(render);
+  startLoop();
 
   if (!navigator.mediaDevices?.getUserMedia) {
     camMsg.textContent = 'Camera API unavailable. Start AsciiFace with the launcher (or open this file in Chrome/Edge).';

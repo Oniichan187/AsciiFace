@@ -115,6 +115,9 @@ $browserArgs = @(
     "--user-data-dir=`"$profileDir`"", '--no-first-run', '--no-default-browser-check',
     # Auto-grant the camera for this private profile -> no permission prompt
     '--use-fake-ui-for-media-stream',
+    # Keep rendering while minimized
+    '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
+    '--disable-backgrounding-occluded-windows',
     "--app=$url"
 )
 
