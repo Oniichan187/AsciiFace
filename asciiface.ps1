@@ -11,6 +11,7 @@ param(
     [int]$Width = 1280,   # virtual camera resolution
     [int]$Height = 720,
     [int]$Fps = 30,
+    [int]$Device = 0,   # driver device slot (0 = "AsciiFace"); only needed for multi-device setups
     [switch]$NoBrowser
 )
 $ErrorActionPreference = 'Stop'
@@ -45,6 +46,8 @@ namespace AsciiFace
         IntPtr basePtr;
         DateTime lastWant;
 
+        public static string Suffix = "";   // device slot 0 has no suffix, slot n uses the character '0'+n
+
         public bool IsOpen { get { return view != null; } }
 
         public static bool DriverInstalled()
@@ -60,10 +63,10 @@ namespace AsciiFace
         {
             try
             {
-                if (mutex == null) mutex = Mutex.OpenExisting("UnityCapture_Mutx");
-                if (wantEvent == null) wantEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "UnityCapture_Want");
-                if (sentEvent == null) sentEvent = EventWaitHandle.OpenExisting("UnityCapture_Sent", EventWaitHandleRights.Modify | EventWaitHandleRights.Synchronize);
-                if (file == null) file = MemoryMappedFile.OpenExisting("UnityCapture_Data", MemoryMappedFileRights.ReadWrite);
+                if (mutex == null) mutex = Mutex.OpenExisting("UnityCapture_Mutx" + Suffix);
+                if (wantEvent == null) wantEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "UnityCapture_Want" + Suffix);
+                if (sentEvent == null) sentEvent = EventWaitHandle.OpenExisting("UnityCapture_Sent" + Suffix, EventWaitHandleRights.Modify | EventWaitHandleRights.Synchronize);
+                if (file == null) file = MemoryMappedFile.OpenExisting("UnityCapture_Data" + Suffix, MemoryMappedFileRights.ReadWrite);
                 view = file.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
                 basePtr = new IntPtr(view.SafeMemoryMappedViewHandle.DangerousGetHandle().ToInt64() + view.PointerOffset);
                 lastWant = DateTime.UtcNow;
@@ -423,6 +426,7 @@ namespace AsciiFace
 '@
 
 Add-Type -TypeDefinition $source -ReferencedAssemblies System.Core
+if ($Device -gt 0) { [AsciiFace.VirtualCamera]::Suffix = [string][char](48 + $Device) }
 
 function Find-Browser {
     $candidates = @(
