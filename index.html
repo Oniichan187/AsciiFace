@@ -174,9 +174,19 @@
   // Keep each character's alpha mask and measure how much ink it actually uses,
   // so brightness maps onto the real visual density of the font.
   function buildGlyphs() {
-    const px = Math.max(4, Math.round(S.font * (window.devicePixelRatio || 1)));
+    const dpr = window.devicePixelRatio || 1;
+    let px = Math.max(4, Math.round(S.font * dpr));
     const m = document.createElement('canvas').getContext('2d');
     m.font = `${px}px ${FONT_STACK}`;
+    // The canvas is scaled to fit its panel, so don't render far more pixels than the panel shows.
+    const stage = out.parentElement;
+    const aspect = video.videoWidth ? video.videoWidth / video.videoHeight : 16 / 9;
+    const fitW = Math.min(stage.clientWidth, stage.clientHeight * aspect) * dpr * 1.25;
+    const fullW = m.measureText('M').width * S.cols;
+    if (fitW > 0 && fullW > fitW) {
+      px = Math.max(4, Math.floor(px * fitW / fullW));
+      m.font = `${px}px ${FONT_STACK}`;
+    }
     const cw = Math.max(2, Math.round(m.measureText('M').width));
     const ch = Math.max(4, Math.round(px * 1.18));
 
@@ -439,8 +449,9 @@
   const onTone = () => { readSettings(); buildToneLUT(); };
   const onGlyph = () => { readSettings(); buildGlyphs(); };
   ['bright', 'contrast', 'gamma', 'invert'].forEach(id => $(id).addEventListener('input', onTone));
-  ['font', 'charset'].forEach(id => $(id).addEventListener('input', onGlyph));
-  ['cols', 'mirror', 'color', 'ink', 'paper'].forEach(id => $(id).addEventListener('input', readSettings));
+  ['font', 'charset', 'cols'].forEach(id => $(id).addEventListener('input', onGlyph));
+  ['mirror', 'color', 'ink', 'paper'].forEach(id => $(id).addEventListener('input', readSettings));
+  video.addEventListener('loadedmetadata', onGlyph);
   window.addEventListener('resize', onGlyph); // devicePixelRatio can change between monitors
 
   $('copyBtn').addEventListener('click', async () => {
