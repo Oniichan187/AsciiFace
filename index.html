@@ -73,6 +73,8 @@
     <div class="panel-head">
       <span class="title">ASCII</span>
       <label class="toggle"><input type="checkbox" id="color"> Color</label>
+      <button id="copyBtn" title="Copy current frame as plain text">Copy text</button>
+      <button id="snapBtn" title="Save current frame as PNG">Save PNG</button>
     </div>
     <div class="stage">
       <canvas id="out"></canvas>
@@ -119,6 +121,7 @@
   let glyphs = null;     // { cw, ch, masks: Uint8Array[], chars: string[] }
   let toneLUT = new Uint8Array(256);   // luminance -> adjusted luminance
   let glyphLUT = new Uint8Array(256);  // adjusted luminance -> glyph index
+  let lastIdx = null, lastCols = 0, lastRows = 0;
   let imgData = null, out32 = null;
 
   // ---------- settings ----------
@@ -235,6 +238,8 @@
       imgData = octx.createImageData(W, H);
       out32 = new Uint32Array(imgData.data.buffer);
     }
+    if (!lastIdx || lastIdx.length !== cols * rows) lastIdx = new Uint8Array(cols * rows);
+    lastCols = cols; lastRows = rows;
 
     const [pr, pg, pb] = S.paper;
     const [ir, ig, ib] = S.ink;
@@ -247,6 +252,7 @@
         // Rec. 709 luma
         const lum = (r * 54 + g * 183 + b * 19) >> 8;
         const gi = glyphLUT[toneLUT[lum]];
+        lastIdx[y * cols + x] = gi;
         if (gi === 0 && glyphs.chars[0] === ' ') continue;
 
         let fr, fg, fb;
@@ -277,6 +283,17 @@
       fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now;
       stats.textContent = `${cols}×${rows} chars · ${vw}×${vh} src · ${fps.toFixed(0)} fps · ${renderMs.toFixed(1)} ms`;
     }
+  }
+
+  function frameAsText() {
+    if (!lastIdx) return '';
+    const lines = [];
+    for (let y = 0; y < lastRows; y++) {
+      let s = '';
+      for (let x = 0; x < lastCols; x++) s += glyphs.chars[lastIdx[y * lastCols + x]];
+      lines.push(s.replace(/\s+$/, ''));
+    }
+    return lines.join('\n');
   }
 
   // ---------- camera ----------
@@ -327,6 +344,21 @@
   ['font', 'charset'].forEach(id => $(id).addEventListener('input', onGlyph));
   ['cols', 'mirror', 'color', 'ink', 'paper'].forEach(id => $(id).addEventListener('input', readSettings));
   window.addEventListener('resize', onGlyph); // devicePixelRatio can change between monitors
+
+  $('copyBtn').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(frameAsText()); flash($('copyBtn'), 'Copied'); }
+    catch { flash($('copyBtn'), 'Failed'); }
+  });
+  $('snapBtn').addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.download = `ascii-${Date.now()}.png`;
+    a.href = out.toDataURL('image/png');
+    a.click();
+  });
+  function flash(btn, text) {
+    const old = btn.textContent; btn.textContent = text;
+    setTimeout(() => (btn.textContent = old), 900);
+  }
 
   readSettings();
   buildToneLUT();
