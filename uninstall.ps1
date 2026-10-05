@@ -31,11 +31,36 @@ Remove-Item (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 
 Remove-Item 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\AsciiFace' -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $env:LOCALAPPDATA 'AsciiFace') -Recurse -Force -ErrorAction SilentlyContinue
 
+Add-Type -Namespace Native -Name Kernel32 -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+public static extern bool MoveFileEx(string existingFileName, string newFileName, int flags);
+'@
+
+# The camera driver stays loaded in every app that listed cameras (Discord, browsers, ...), so its
+# DLL can't be deleted yet. A loaded file can still be moved on the same drive, though: park it in
+# Windows\Temp and let Windows delete it on the next reboot, so the install folder goes away right now.
+function Remove-Folder([string]$Path) {
+    $parked = 0
+    foreach ($f in Get-ChildItem $Path -Recurse -File -Force) {
+        try { Remove-Item $f.FullName -Force -ErrorAction Stop }
+        catch {
+            $target = Join-Path "$env:SystemRoot\Temp" ("asciiface-" + [guid]::NewGuid().ToString('N') + $f.Extension)
+            Move-Item $f.FullName $target -Force -ErrorAction Stop
+            # [NullString]::Value: a plain $null would be passed as "" and the call would fail
+            [void][Native.Kernel32]::MoveFileEx($target, [NullString]::Value, 4)   # MOVEFILE_DELAY_UNTIL_REBOOT
+            $parked++
+        }
+    }
+    Remove-Item $Path -Recurse -Force -ErrorAction Stop
+    $parked
+}
+
 try {
-    Remove-Item $dest -Recurse -Force
+    if (Test-Path $dest) { $parked = Remove-Folder $dest } else { $parked = 0 }
     Write-Host 'AsciiFace was removed.' -ForegroundColor Green
+    if ($parked) { Write-Host "$parked driver file(s) still loaded by open apps will be deleted on the next restart." }
 }
 catch {
-    Write-Host "Some files in $dest are still in use (close Discord/Zoom/OBS) - delete the folder manually." -ForegroundColor Red
+    Write-Host "Could not remove ${dest}: $_" -ForegroundColor Red
 }
 Read-Host "`nPress Enter to close"
