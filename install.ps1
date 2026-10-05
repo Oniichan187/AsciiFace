@@ -32,8 +32,16 @@ try {
     foreach ($f in 'index.html', 'asciiface.ps1', 'uninstall.ps1', 'LICENSE', 'README.md') {
         Copy-Item (Join-Path $src $f) $dest -Force
     }
-    Copy-Item (Join-Path $src 'driver\*') (Join-Path $dest 'driver') -Force
-    Get-ChildItem $dest -Recurse -File | Unblock-File
+    # The driver DLLs are locked while an app (Discord, Zoom, ...) has the camera loaded,
+    # so only replace them when they actually changed.
+    foreach ($f in Get-ChildItem (Join-Path $src 'driver') -File) {
+        $target = Join-Path $dest "driver\$($f.Name)"
+        if ((Test-Path $target) -and
+            (Get-FileHash $target).Hash -eq (Get-FileHash $f.FullName).Hash) { continue }
+        try { Copy-Item $f.FullName $target -Force }
+        catch { throw "$($f.Name) is in use. Close Discord, Zoom, Teams, OBS and browsers, then run the installer again." }
+    }
+    Get-ChildItem $dest -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
 
     Step 'Registering virtual camera "AsciiFace"'
     $regsvr = @(
