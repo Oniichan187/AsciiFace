@@ -36,11 +36,13 @@
   .mirror { transform: scaleX(-1); }
   .msg { position: absolute; color: var(--muted); text-align: center; padding: 16px; }
 
+  input[type=checkbox] { accent-color: var(--accent); }
   select, button { background: #1c1f23; color: var(--text); border: 1px solid var(--line);
     border-radius: 6px; padding: 5px 8px; font: inherit; }
   select { max-width: 260px; }
   button { cursor: pointer; }
   button:hover, select:hover { border-color: #3a3f46; }
+  .toggle { color: var(--text) !important; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -64,6 +66,7 @@
   <section class="panel">
     <div class="panel-head">
       <span class="title">ASCII</span>
+      <label class="toggle"><input type="checkbox" id="color"> Color</label>
     </div>
     <div class="stage">
       <canvas id="out"></canvas>
@@ -95,6 +98,9 @@
     cols: 160, font: 9, mirror: true, charset: CHARSET, ink: [232, 232, 232], paper: [0, 0, 0],
     bright: 0, contrast: 1.2, gamma: 1, invert: false
   };
+  function readSettings() {
+    S.color = $('color').checked;
+  }
 
   // ---------- glyph atlas ----------
   // Rasterize each character into a cw×ch alpha mask.
@@ -201,7 +207,8 @@
         const gi = glyphLUT[toneLUT[lum]];
         if (gi === 0 && glyphs.chars[0] === ' ') continue;
 
-        const fr = ir, fg = ig, fb = ib;
+        let fr, fg, fb;
+        if (S.color) { fr = r; fg = g; fb = b; } else { fr = ir; fg = ig; fb = ib; }
 
         const mask = masks[gi];
         const ox = x * cw, oy = y * ch;
@@ -272,9 +279,11 @@
   camSelect.addEventListener('change', () => startCamera(camSelect.value));
   navigator.mediaDevices?.addEventListener?.('devicechange', () => listCameras(camSelect.value));
 
-  const onGlyph = () => buildGlyphs();
+  const onGlyph = () => { readSettings(); buildGlyphs(); };
+  $('color').addEventListener('input', readSettings);
   window.addEventListener('resize', onGlyph); // devicePixelRatio can change between monitors
 
+  readSettings();
   buildToneLUT();
   if (document.fonts?.ready) document.fonts.ready.then(buildGlyphs); else buildGlyphs();
   buildGlyphs();
