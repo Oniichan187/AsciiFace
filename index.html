@@ -192,10 +192,13 @@
 
     const chars = Array.from(new Set(S.charset.split('')));
     const masks = renderMasks(chars, px, cw, ch);
+    // Measure ink coverage at a fixed reference size: tiny cells are too coarse to rank glyphs.
+    const REF = 48;
+    const refMasks = renderMasks(chars, REF, Math.round(REF * cw / px), Math.round(REF * 1.18));
     const items = chars.map((char, i) => {
       let sum = 0;
-      for (const a of masks[i]) sum += a;
-      return { char, mask: masks[i], cov: sum / (masks[i].length * 255) };
+      for (const a of refMasks[i]) sum += a;
+      return { char, mask: masks[i], cov: sum / (refMasks[i].length * 255) };
     });
     items.sort((a, b) => a.cov - b.cov);
 
