@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AsciiFace</title>
+<style>
+  :root {
+    --bg: #0b0c0e;
+    --panel: #141619;
+    --line: #24272c;
+    --text: #d7dae0;
+    --muted: #7d838d;
+    --accent: #5ee08a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: flex; flex-direction: column; }
+
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font: 600 14px/1 Consolas, "Courier New", monospace; margin: 0; letter-spacing: .04em; }
+
+  main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; min-height: 0; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-auto-rows: minmax(260px, 1fr); } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    border-bottom: 1px solid var(--line); min-height: 44px; flex-wrap: wrap; }
+  .panel-head .title { color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: .08em; margin-right: auto; }
+  .stage { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; background: #000; position: relative; }
+  .stage video, .stage canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .mirror { transform: scaleX(-1); }
+  .msg { position: absolute; color: var(--muted); text-align: center; padding: 16px; }
+
+  select, button { background: #1c1f23; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; font: inherit; }
+  select { max-width: 260px; }
+  button { cursor: pointer; }
+  button:hover, select:hover { border-color: #3a3f46; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ASCIIFACE</h1>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="panel-head">
+      <span class="title">Camera</span>
+      <select id="camSelect"><option>Requesting camera…</option></select>
+    </div>
+    <div class="stage">
+      <video id="video" class="mirror" autoplay playsinline muted></video>
+      <div class="msg" id="camMsg"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <span class="title">ASCII</span>
+    </div>
+    <div class="stage">
+      <canvas id="out"></canvas>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const video = $('video');
+  const camSelect = $('camSelect'), camMsg = $('camMsg');
+
+  let stream = null;
+
+  // ---------- camera ----------
+  async function listCameras(selectedId) {
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+    camSelect.innerHTML = '';
+    devices.forEach((d, i) => {
+      const o = document.createElement('option');
+      o.value = d.deviceId;
+      o.textContent = d.label || `Camera ${i + 1}`;
+      camSelect.appendChild(o);
+    });
+    if (!devices.length) {
+      camSelect.innerHTML = '<option>No camera found</option>';
+      return;
+    }
+    if (selectedId && devices.some(d => d.deviceId === selectedId)) camSelect.value = selectedId;
+  }
+
+  async function startCamera(deviceId) {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    camMsg.textContent = '';
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+          width: { ideal: 1280 }, height: { ideal: 720 }
+        },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+      const id = stream.getVideoTracks()[0]?.getSettings().deviceId;
+      await listCameras(id || deviceId);
+    } catch (e) {
+      camMsg.textContent = `Camera error: ${e.name}${e.message ? ' – ' + e.message : ''}`;
+      await listCameras(deviceId).catch(() => {});
+    }
+  }
+
+  // ---------- wiring ----------
+  camSelect.addEventListener('change', () => startCamera(camSelect.value));
+  navigator.mediaDevices?.addEventListener?.('devicechange', () => listCameras(camSelect.value));
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    camMsg.textContent = 'Camera API unavailable. Open this page in Chrome or Edge.';
+  } else {
+    startCamera();
+  }
+})();
+</script>
+</body>
+</html>
