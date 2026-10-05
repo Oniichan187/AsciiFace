@@ -367,7 +367,7 @@
   requestAnimationFrame(render);
 
   if (!navigator.mediaDevices?.getUserMedia) {
-    camMsg.textContent = 'Camera API unavailable. Open this page in Chrome or Edge.';
+    camMsg.textContent = 'Camera API unavailable. Start AsciiFace with the launcher (or open this file in Chrome/Edge).';
   } else {
     startCamera();
   }
