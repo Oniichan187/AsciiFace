@@ -49,6 +49,10 @@
   button { cursor: pointer; }
   button:hover, select:hover { border-color: #3a3f46; }
   .toggle { color: var(--text) !important; font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; display: inline-block; }
+  .dot.on { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .dot.wait { background: #e0b341; }
+  .dot.err { background: #e5534b; }
 </style>
 </head>
 <body>
@@ -73,6 +77,7 @@
     <div class="panel-head">
       <span class="title">ASCII</span>
       <label class="toggle"><input type="checkbox" id="color"> Color</label>
+      <button id="vcamBtn" title="Virtual cam"><span class="dot" id="vcamDot"></span> Virtual cam</button>
       <button id="copyBtn" title="Copy current frame as plain text">Copy text</button>
       <button id="snapBtn" title="Save current frame as PNG">Save PNG</button>
     </div>
@@ -122,6 +127,7 @@
   let toneLUT = new Uint8Array(256);   // luminance -> adjusted luminance
   let glyphLUT = new Uint8Array(256);  // adjusted luminance -> glyph index
   let lastIdx = null, lastCols = 0, lastRows = 0;
+  let cellMsg = null;   // virtual-camera frame message: 24-byte header + (glyph, r, g, b) per cell
   let imgData = null, out32 = null;
 
   // ---------- settings ----------
@@ -195,7 +201,7 @@
       }
       glyphLUT[v] = best;
     }
-    glyphs = { cw, ch, masks: items.map(i => i.mask), chars: items.map(i => i.char) };
+    glyphs = { px, cw, ch, masks: items.map(i => i.mask), chars: items.map(i => i.char), version: (glyphs?.version || 0) + 1 };
     imgData = null; // force canvas resize
   }
 
@@ -238,6 +244,7 @@
       out32 = new Uint32Array(imgData.data.buffer);
     }
     if (!lastIdx || lastIdx.length !== cols * rows) lastIdx = new Uint8Array(cols * rows);
+    if (!cellMsg || cellMsg.length !== 24 + cols * rows * 4) cellMsg = new Uint8Array(24 + cols * rows * 4);
     lastCols = cols; lastRows = rows;
 
     const [pr, pg, pb] = S.paper;
@@ -252,6 +259,8 @@
         const lum = (r * 54 + g * 183 + b * 19) >> 8;
         const gi = glyphLUT[toneLUT[lum]];
         lastIdx[y * cols + x] = gi;
+        const ci = 24 + (y * cols + x) * 4;
+        cellMsg[ci] = gi; cellMsg[ci + 1] = r; cellMsg[ci + 2] = g; cellMsg[ci + 3] = b;
         if (gi === 0 && glyphs.chars[0] === ' ') continue;
 
         let fr, fg, fb;
@@ -274,6 +283,7 @@
       }
     }
     octx.putImageData(imgData, 0, 0);
+    sendToVcam();
 
     renderMs = renderMs * 0.9 + (performance.now() - t0) * 0.1;
     frames++;
@@ -306,9 +316,87 @@
     worker.onmessage = () => { if (document.hidden) render(); };
   }
 
+  // ---------- virtual camera ----------
+  // When served by asciiface.ps1, frames go over a local WebSocket to the "AsciiFace" camera driver.
+  const VCAM_FPS = 30;
+  const VCAM_URL = location.protocol === 'http:' ? `ws://${location.host}/vcam` : null;
+  const VCAM_TEXT = {
+    off: 'Virtual cam off – click to enable',
+    connecting: 'Connecting to AsciiFace…',
+    nodriver: 'Camera driver not installed – run install.cmd',
+    waiting: 'Ready – select "AsciiFace" as camera in Discord, Zoom, OBS…',
+    live: 'Live – an app is showing the AsciiFace camera',
+    offline: 'Start AsciiFace with the launcher to use the virtual cam'
+  };
+  const vcamBtn = $('vcamBtn'), vcamDot = $('vcamDot');
+  let vcamSize = { width: 1280, height: 720 }, vcamAtlasKey = '';
+  let vcam = null, vcamEnabled = !!VCAM_URL, vcamState = 'off', vcamLastSent = 0;
+
+  function setVcamState(state) {
+    vcamState = state;
+    vcamDot.className = 'dot ' + ({ live: 'on', waiting: 'wait', nodriver: 'err', offline: 'err' }[state] || '');
+    vcamBtn.title = VCAM_TEXT[state];
+  }
+
+  function connectVcam() {
+    if (!VCAM_URL) return setVcamState('offline');
+    setVcamState('connecting');
+    vcam = new WebSocket(VCAM_URL);
+    vcamAtlasKey = '';   // a (re)started server needs the atlas again
+    vcam.onmessage = e => {
+      const st = JSON.parse(e.data);
+      if (st.width) vcamSize = { width: st.width, height: st.height };
+      setVcamState(st.state);
+    };
+    vcam.onclose = () => {
+      vcam = null;
+      if (!vcamEnabled) return setVcamState('off');
+      setVcamState('offline');
+      setTimeout(() => vcamEnabled && !vcam && connectVcam(), 2000);
+    };
+  }
+
+  vcamBtn.addEventListener('click', () => {
+    vcamEnabled = !vcamEnabled;
+    if (vcamEnabled) connectVcam();
+    else if (vcam) vcam.close();
+    else setVcamState('off');
+  });
+
+  // The camera image is drawn by asciiface.ps1 at a fixed resolution: the page only sends the glyph
+  // shapes once per layout and then 4 bytes per character cell, so cost doesn't grow with columns.
+  function sendVcamAtlas(cols, rows) {
+    const { width: VW, height: VH } = vcamSize;
+    const k = Math.min(VW / (cols * glyphs.cw), VH / (rows * glyphs.ch));
+    const cw = Math.max(1, Math.floor(glyphs.cw * k)), ch = Math.max(1, Math.floor(glyphs.ch * k));
+    const masks = renderMasks(glyphs.chars, glyphs.px * ch / glyphs.ch, cw, ch);
+    const msg = new Uint8Array(16 + masks.length * cw * ch);
+    const dv = new DataView(msg.buffer);
+    dv.setInt32(0, 1, true); dv.setInt32(4, cw, true); dv.setInt32(8, ch, true); dv.setInt32(12, masks.length, true);
+    masks.forEach((m, i) => msg.set(m, 16 + i * cw * ch));
+    vcam.send(msg);
+  }
+
+  function sendToVcam() {
+    // Only spend time on this while an app is actually showing the camera.
+    if (vcamState !== 'live' || !vcam || vcam.readyState !== 1 || !cellMsg) return;
+    const now = performance.now();
+    if (now - vcamLastSent < 1000 / VCAM_FPS - 2 || vcam.bufferedAmount > 0) return;
+    vcamLastSent = now;
+    const key = `${glyphs.version}|${lastCols}x${lastRows}|${vcamSize.width}x${vcamSize.height}`;
+    if (key !== vcamAtlasKey) { sendVcamAtlas(lastCols, lastRows); vcamAtlasKey = key; }
+    const dv = new DataView(cellMsg.buffer);
+    const [ir, ig, ib] = S.ink, [pr, pg, pb] = S.paper;
+    dv.setInt32(0, 2, true); dv.setInt32(4, lastCols, true); dv.setInt32(8, lastRows, true);
+    dv.setInt32(12, S.color ? 1 : 0, true);
+    dv.setInt32(16, ir | ig << 8 | ib << 16, true);
+    dv.setInt32(20, pr | pg << 8 | pb << 16, true);
+    vcam.send(cellMsg);
+  }
+
   // ---------- camera ----------
   async function listCameras(selectedId) {
-    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput' && !/asciiface|virtual cam/i.test(d.label)); // avoid feeding our own output back in
     camSelect.innerHTML = '';
     devices.forEach((d, i) => {
       const o = document.createElement('option');
@@ -375,6 +463,7 @@
   if (document.fonts?.ready) document.fonts.ready.then(buildGlyphs); else buildGlyphs();
   buildGlyphs();
   startLoop();
+  if (vcamEnabled) connectVcam(); else setVcamState(VCAM_URL ? 'off' : 'offline');
 
   if (!navigator.mediaDevices?.getUserMedia) {
     camMsg.textContent = 'Camera API unavailable. Start AsciiFace with the launcher (or open this file in Chrome/Edge).';
